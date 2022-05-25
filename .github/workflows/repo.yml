@@ -1,0 +1,59 @@
+name: Repo Dispatcher
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Compile Target(Leave blank to compile all supported targets)'
+        required: false
+      ssh:
+        description: 'SSH connection to Actions(Input 1 to enabled)'
+        required: false
+      cancel:
+        description: 'Input 1 to Cancel Running Project'
+        required: false
+
+      delete:
+        description: 'Input 1 to Delete Workflow Runs'
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Cancel Running Wrkflows
+      uses: styfle/cancel-workflow-action@main
+      if: github.event.inputs.cancel=='1'
+      with:
+        ignore_sha: true
+        workflow_id: ${{secrets.WORK_ID}}
+        access_token: ${{github.token}}
+
+    - name: Delete Workflow Runs
+      uses: yIwIoTT9A21nupT/delete-workflow-runs@main
+      with:
+        retain_min: 0
+        keep_minimum_runs: 0
+
+    - name: Trigger Compile
+      env:
+        REPO_TOKEN: ${{secrets.REPO_TOKEN}}
+      run: |
+        [ "${{github.event.inputs.cancel}}" = 1 ] && echo "Cancel Running Project!" && exit 0
+        [ "${{github.event.inputs.delete}}" = 1 ] && echo "Delete Workflow Runs!" && exit 0
+        A=$(curl -Lfs https://raw.githubusercontent.com/${{github.repository}}/master/README.md | grep Target | cut -d: -f2)
+        [ -z "${{github.event.inputs.target}}" ] && B=$A || B="${{github.event.inputs.target}}";B=${B^^}
+        for i in $B;do
+            if ! echo $A | grep -q $i;then
+                echo "$i:Not support!";exit 1
+            fi
+        done
+        [ "${{github.event.inputs.ssh}}" = 1 ] && C=ssh
+        for i in $B;do
+            curl -Lfs \
+            -X POST https://api.github.com/repos/${{github.repository}}/dispatches \
+            -H "Accept: application/vnd.github.everest-preview+json" \
+            -H "Authorization: token $REPO_TOKEN" \
+            -d "{\"event_type\": \"$i $C\", \"client_payload\": {\"target\": \"$i\"}}" && echo "$i Success!" || echo "$i Failed!"
+        done
